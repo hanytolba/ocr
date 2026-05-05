@@ -1,0 +1,1065 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>قارئ النصوص الذكي —  Hany Tolba OCR</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Kufi+Arabic:wght@200;400;700;900&family=IBM+Plex+Sans+Arabic:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        :root {
+            --bg: #0a0f0d;
+            --bg2: #111a16;
+            --card: #15201b;
+            --card-hover: #1a2b24;
+            --border: #243d33;
+            --accent: #00e89d;
+            --accent2: #00c9ff;
+            --accent-dim: rgba(0, 232, 157, 0.15);
+            --fg: #e8f5ef;
+            --muted: #7a9e8e;
+            --danger: #ff5c6a;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'IBM Plex Sans Arabic', sans-serif;
+            background: var(--bg);
+            color: var(--fg);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        h1, h2, h3 { font-family: 'Noto Kufi Arabic', sans-serif; }
+
+        /* خلفية متحركة */
+        .bg-glow {
+            position: fixed;
+            inset: 0;
+            z-index: 0;
+            pointer-events: none;
+            overflow: hidden;
+        }
+        .bg-glow::before {
+            content: '';
+            position: absolute;
+            width: 600px; height: 600px;
+            background: radial-gradient(circle, rgba(0,232,157,0.08) 0%, transparent 70%);
+            top: -200px; right: -100px;
+            animation: float1 12s ease-in-out infinite;
+        }
+        .bg-glow::after {
+            content: '';
+            position: absolute;
+            width: 500px; height: 500px;
+            background: radial-gradient(circle, rgba(0,201,255,0.06) 0%, transparent 70%);
+            bottom: -150px; left: -100px;
+            animation: float2 15s ease-in-out infinite;
+        }
+        @keyframes float1 {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            50% { transform: translate(-80px, 60px) scale(1.2); }
+        }
+        @keyframes float2 {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            50% { transform: translate(60px, -40px) scale(1.15); }
+        }
+
+        /* شبكة النقاط */
+        .dot-grid {
+            position: fixed;
+            inset: 0;
+            z-index: 0;
+            pointer-events: none;
+            background-image: radial-gradient(rgba(0,232,157,0.06) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+
+        /* منطقة السحب والإفلات */
+        .drop-zone {
+            border: 2px dashed var(--border);
+            border-radius: 16px;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+            cursor: pointer;
+        }
+        .drop-zone::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, var(--accent-dim), transparent 60%);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .drop-zone:hover, .drop-zone.drag-over {
+            border-color: var(--accent);
+            box-shadow: 0 0 40px rgba(0,232,157,0.1);
+        }
+        .drop-zone:hover::before, .drop-zone.drag-over::before {
+            opacity: 1;
+        }
+
+        /* الأزرار */
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent), #00c983);
+            color: var(--bg);
+            font-weight: 700;
+            padding: 12px 28px;
+            border-radius: 12px;
+            border: none;
+            cursor: pointer;
+            font-size: 15px;
+            font-family: 'IBM Plex Sans Arabic', sans-serif;
+            transition: all 0.25s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(0,232,157,0.3);
+        }
+        .btn-primary:active { transform: translateY(0); }
+        .btn-primary:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
+        .btn-secondary {
+            background: var(--card);
+            color: var(--fg);
+            font-weight: 600;
+            padding: 10px 22px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            cursor: pointer;
+            font-size: 14px;
+            font-family: 'IBM Plex Sans Arabic', sans-serif;
+            transition: all 0.25s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-secondary:hover {
+            background: var(--card-hover);
+            border-color: var(--accent);
+        }
+
+        /* شريط التقدم */
+        .progress-bar-track {
+            width: 100%;
+            height: 6px;
+            background: var(--bg2);
+            border-radius: 99px;
+            overflow: hidden;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), var(--accent2));
+            border-radius: 99px;
+            transition: width 0.3s ease;
+            box-shadow: 0 0 12px rgba(0,232,157,0.5);
+        }
+
+        /* منطقة النص الناتج */
+        .result-box {
+            background: var(--bg2);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            min-height: 200px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-size: 16px;
+            line-height: 1.9;
+            white-space: pre-wrap;
+            word-break: break-word;
+            direction: auto;
+            unicode-bidi: plaintext;
+            color: var(--fg);
+        }
+        .result-box::-webkit-scrollbar { width: 6px; }
+        .result-box::-webkit-scrollbar-track { background: transparent; }
+        .result-box::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+
+        /* معاينة الصورة */
+        .image-preview {
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            background: var(--bg2);
+            position: relative;
+        }
+        .image-preview img {
+            width: 100%;
+            max-height: 400px;
+            object-fit: contain;
+            display: block;
+        }
+
+        /* الاختيارات */
+        .lang-btn {
+            padding: 8px 18px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: var(--bg2);
+            color: var(--muted);
+            cursor: pointer;
+            font-size: 13px;
+            font-family: 'IBM Plex Sans Arabic', sans-serif;
+            transition: all 0.2s;
+        }
+        .lang-btn.active {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: var(--accent-dim);
+        }
+        .lang-btn:hover:not(.active) {
+            border-color: var(--muted);
+            color: var(--fg);
+        }
+
+        /* إشعار Toast */
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: var(--card);
+            border: 1px solid var(--border);
+            color: var(--fg);
+            padding: 14px 28px;
+            border-radius: 12px;
+            font-size: 14px;
+            z-index: 9999;
+            opacity: 0;
+            transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+        }
+        .toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+        .toast.success { border-color: var(--accent); }
+        .toast.error { border-color: var(--danger); }
+
+        /* خطوط المسح */
+        .scan-line {
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+            box-shadow: 0 0 20px var(--accent);
+            animation: scanDown 2s ease-in-out infinite;
+            z-index: 5;
+            display: none;
+        }
+        .scan-line.active { display: block; }
+        @keyframes scanDown {
+            0% { top: 0; opacity: 1; }
+            100% { top: 100%; opacity: 0.3; }
+        }
+
+        /* إحصائيات */
+        .stat-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px 20px;
+            text-align: center;
+            transition: all 0.25s;
+        }
+        .stat-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-2px);
+        }
+
+        /* حركة الظهور */
+        .fade-in {
+            animation: fadeIn 0.5s ease forwards;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(15px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* تأثير النبض */
+        @keyframes pulse-accent {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(0,232,157,0.3); }
+            50% { box-shadow: 0 0 0 8px rgba(0,232,157,0); }
+        }
+        .pulse { animation: pulse-accent 2s infinite; }
+
+        /* تحديد المنطقة */
+        .crop-overlay {
+            position: absolute;
+            inset: 0;
+            z-index: 10;
+            cursor: crosshair;
+            display: none;
+        }
+        .crop-overlay.active { display: block; }
+        .crop-rect {
+            position: absolute;
+            border: 2px solid var(--accent);
+            background: rgba(0,232,157,0.1);
+            z-index: 11;
+            pointer-events: none;
+        }
+        .crop-mask {
+            position: absolute;
+            background: rgba(10,15,13,0.7);
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .main-grid { grid-template-columns: 1fr !important; }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-glow"></div>
+    <div class="dot-grid"></div>
+
+    <div class="relative z-10 min-h-screen flex flex-col">
+        <!-- الهيدر -->
+        <header class="py-6 px-6 border-b" style="border-color: var(--border); background: rgba(10,15,13,0.8); backdrop-filter: blur(20px);">
+            <div class="max-w-6xl mx-auto flex items-center justify-between">
+                <div class="flex items-center gap-4">
+                    <div class="w-11 h-11 rounded-xl flex items-center justify-center" style="background: linear-gradient(135deg, var(--accent), var(--accent2));">
+                        <i class="fa-solid fa-eye text-lg" style="color: var(--bg);"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold" style="font-family: 'Noto Kufi Arabic', sans-serif;">قارئ النصوص الذكي</h1>
+                        <p class="text-xs" style="color: var(--muted);">استخراج النصوص من الصور مباشرة في متصفحك</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <button onclick="pasteFromClipboard()" class="btn-secondary text-sm" title="لصق من الحافظة">
+                        <i class="fa-regular fa-clipboard"></i>
+                        <span class="hidden sm:inline">لصق</span>
+                    </button>
+                    <button onclick="resetAll()" class="btn-secondary text-sm" title="مسح الكل">
+                        <i class="fa-solid fa-rotate-right"></i>
+                        <span class="hidden sm:inline">جديد</span>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- المحتوى الرئيسي -->
+        <main class="flex-1 p-6">
+            <div class="max-w-6xl mx-auto">
+
+                <!-- اختيار اللغة -->
+                <section class="mb-6 fade-in">
+                    <div class="flex items-center gap-3 mb-3">
+                        <i class="fa-solid fa-language" style="color: var(--accent);"></i>
+                        <span class="font-semibold text-sm">اختر لغة النص في الصورة</span>
+                    </div>
+                    <div class="flex flex-wrap gap-2" id="langSelector">
+                        <button class="lang-btn active" data-lang="ara" onclick="selectLang(this)">العربية</button>
+                        <button class="lang-btn" data-lang="eng" onclick="selectLang(this)">English</button>
+                        <button class="lang-btn" data-lang="ara+eng" onclick="selectLang(this)">عربي + إنجليزي</button>
+                        <button class="lang-btn" data-lang="fra" onclick="selectLang(this)">Français</button>
+                        <button class="lang-btn" data-lang="deu" onclick="selectLang(this)">Deutsch</button>
+                        <button class="lang-btn" data-lang="tur" onclick="selectLang(this)">Türkçe</button>
+                        <button class="lang-btn" data-lang="urd" onclick="selectLang(this)">اردو</button>
+                        <button class="lang-btn" data-lang="jpn" onclick="selectLang(this)">日本語</button>
+                        <button class="lang-btn" data-lang="chi_sim" onclick="selectLang(this)">中文</button>
+                        <button class="lang-btn" data-lang="rus" onclick="selectLang(this)">Русский</button>
+                    </div>
+                </section>
+
+                <!-- الشبكة الرئيسية -->
+                <div class="main-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+
+                    <!-- العمود الأيسر: الصورة -->
+                    <div class="flex flex-col gap-4">
+                        <!-- منطقة الرفع -->
+                        <div class="drop-zone p-8 text-center" id="dropZone" onclick="document.getElementById('fileInput').click()">
+                            <input type="file" id="fileInput" accept="image/*" hidden>
+                            <div class="relative z-10">
+                                <div class="w-16 h-16 mx-auto mb-4 rounded-2xl flex items-center justify-center" style="background: var(--accent-dim);">
+                                    <i class="fa-solid fa-cloud-arrow-up text-2xl" style="color: var(--accent);"></i>
+                                </div>
+                                <p class="font-semibold mb-1">اسحب الصورة هنا أو اضغط للاختيار</p>
+                                <p class="text-sm" style="color: var(--muted);">يدعم PNG, JPG, WEBP, BMP — أو Ctrl+V للصق لقطة شاشة</p>
+                            </div>
+                        </div>
+
+                        <!-- معاينة الصورة -->
+                        <div class="image-preview hidden" id="previewContainer">
+                            <div class="scan-line" id="scanLine"></div>
+                            <img id="previewImage" alt="معاينة الصورة">
+                            <div class="crop-overlay" id="cropOverlay">
+                                <div class="crop-rect" id="cropRect"></div>
+                            </div>
+                            <!-- أزرار فوق الصورة -->
+                            <div class="absolute top-3 left-3 flex gap-2 z-20">
+                                <button onclick="toggleCropMode()" class="btn-secondary text-xs py-2 px-3" id="cropBtn" title="تحديد منطقة">
+                                    <i class="fa-solid fa-crop-simple"></i>
+                                    قص منطقة
+                                </button>
+                                <button onclick="removeImage()" class="btn-secondary text-xs py-2 px-3" style="border-color: var(--danger); color: var(--danger);">
+                                    <i class="fa-solid fa-trash-can"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- زر البدء -->
+                        <button class="btn-primary w-full justify-center text-lg py-4" id="startBtn" disabled onclick="startOCR()">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i>
+                            بدء استخراج النص
+                        </button>
+
+                        <!-- شريط التقدم -->
+                        <div class="hidden" id="progressSection">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-sm font-semibold" id="progressLabel">جاري التهيئة...</span>
+                                <span class="text-sm font-bold" style="color: var(--accent);" id="progressPercent">0%</span>
+                            </div>
+                            <div class="progress-bar-track">
+                                <div class="progress-bar-fill" id="progressFill" style="width: 0%;"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- العمود الأيمن: النتيجة -->
+                    <div class="flex flex-col gap-4">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-3">
+                                <i class="fa-solid fa-file-lines" style="color: var(--accent);"></i>
+                                <span class="font-semibold">النص المستخرج</span>
+                            </div>
+                            <div class="flex gap-2" id="resultActions" style="display: none;">
+                                <button onclick="copyResult()" class="btn-secondary text-xs py-2 px-3">
+                                    <i class="fa-regular fa-copy"></i>
+                                    نسخ
+                                </button>
+                                <button onclick="downloadResult()" class="btn-secondary text-xs py-2 px-3">
+                                    <i class="fa-solid fa-download"></i>
+                                    تحميل
+                                </button>
+                                <button onclick="speakResult()" class="btn-secondary text-xs py-2 px-3" id="speakBtn">
+                                    <i class="fa-solid fa-volume-high"></i>
+                                    قراءة
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="result-box flex-1" id="resultBox">
+                            <div class="flex flex-col items-center justify-center h-full opacity-40" id="emptyState">
+                                <i class="fa-solid fa-text-slash text-4xl mb-3"></i>
+                                <p>النص المستخرج سيظهر هنا</p>
+                            </div>
+                        </div>
+
+                        <!-- الإحصائيات -->
+                        <div class="grid grid-cols-3 gap-3 hidden" id="statsSection">
+                            <div class="stat-card">
+                                <div class="text-2xl font-bold" style="color: var(--accent);" id="statChars">0</div>
+                                <div class="text-xs mt-1" style="color: var(--muted);">حرف</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="text-2xl font-bold" style="color: var(--accent2);" id="statWords">0</div>
+                                <div class="text-xs mt-1" style="color: var(--muted);">كلمة</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="text-2xl font-bold" style="color: var(--accent);" id="statConf">0%</div>
+                                <div class="text-xs mt-1" style="color: var(--muted);">دقة القراءة</div>
+                            </div>
+                        </div>
+
+                        <!-- بحث داخل النص -->
+                        <div class="hidden" id="searchSection">
+                            <div class="relative">
+                                <input type="text" id="searchInput" placeholder="ابحث في النص المستخرج..." 
+                                    class="w-full py-3 px-4 pr-10 rounded-xl text-sm outline-none"
+                                    style="background: var(--bg2); border: 1px solid var(--border); color: var(--fg); font-family: 'IBM Plex Sans Arabic', sans-serif;"
+                                    oninput="searchInResult()">
+                                <i class="fa-solid fa-magnifying-glass absolute right-4 top-1/2 -translate-y-1/2" style="color: var(--muted);"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- نصائح -->
+                <section class="mt-8 fade-in" style="animation-delay: 0.3s;">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div class="stat-card flex items-start gap-3 text-right">
+                            <i class="fa-solid fa-lightbulb mt-1" style="color: var(--accent);"></i>
+                            <div>
+                                <div class="text-sm font-semibold mb-1">صور واضحة</div>
+                                <div class="text-xs" style="color: var(--muted);">كلما كانت الصورة أوضح، كانت النتائج أدق</div>
+                            </div>
+                        </div>
+                        <div class="stat-card flex items-start gap-3 text-right">
+                            <i class="fa-solid fa-sun mt-1" style="color: var(--accent);"></i>
+                            <div>
+                                <div class="text-sm font-semibold mb-1">إضاءة جيدة</div>
+                                <div class="text-xs" style="color: var(--muted);">تجنب الظلال والانعكاسات على النص</div>
+                            </div>
+                        </div>
+                        <div class="stat-card flex items-start gap-3 text-right">
+                            <i class="fa-solid fa-expand mt-1" style="color: var(--accent);"></i>
+                            <div>
+                                <div class="text-sm font-semibold mb-1">دقة عالية</div>
+                                <div class="text-xs" style="color: var(--muted);">الصور عالية الدقة تعطي نتائج أفضل بكثير</div>
+                            </div>
+                        </div>
+                        <div class="stat-card flex items-start gap-3 text-right">
+                            <i class="fa-solid fa-scissors mt-1" style="color: var(--accent);"></i>
+                            <div>
+                                <div class="text-sm font-semibold mb-1">قص المنطقة</div>
+                                <div class="text-xs" style="color: var(--muted);">استخدم أداة القص لتحديد المنطقة المطلوبة فقط</div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+
+        <!-- الفوتر -->
+        <footer class="py-4 px-6 text-center text-xs border-t" style="border-color: var(--border); color: var(--muted);">
+            حقوق الملكية هانى عصمت _ يعمل بالكامل في متصفحك — لا يتم إرسال أي صور إلى خوادم خارجية
+        </footer>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast">
+        <i class="fa-solid fa-check-circle" id="toastIcon"></i>
+        <span id="toastMsg"></span>
+    </div>
+
+    <!-- Canvas مخفي للقص -->
+    <canvas id="cropCanvas" hidden></canvas>
+
+    <script>
+        // ==================== المتغيرات العامة ====================
+        let selectedLang = 'ara';
+        let currentImageSrc = null;
+        let isProcessing = false;
+        let cropMode = false;
+        let cropStart = null;
+        let cropEnd = null;
+        let croppedImageData = null;
+        let extractedText = '';
+        let isSpeaking = false;
+
+        // ==================== عناصر DOM ====================
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const previewContainer = document.getElementById('previewContainer');
+        const previewImage = document.getElementById('previewImage');
+        const startBtn = document.getElementById('startBtn');
+        const progressSection = document.getElementById('progressSection');
+        const progressLabel = document.getElementById('progressLabel');
+        const progressPercent = document.getElementById('progressPercent');
+        const progressFill = document.getElementById('progressFill');
+        const resultBox = document.getElementById('resultBox');
+        const emptyState = document.getElementById('emptyState');
+        const resultActions = document.getElementById('resultActions');
+        const statsSection = document.getElementById('statsSection');
+        const searchSection = document.getElementById('searchSection');
+        const scanLine = document.getElementById('scanLine');
+        const cropOverlay = document.getElementById('cropOverlay');
+        const cropRect = document.getElementById('cropRect');
+        const cropCanvas = document.getElementById('cropCanvas');
+        const cropBtn = document.getElementById('cropBtn');
+
+        // ==================== اختيار اللغة ====================
+        function selectLang(btn) {
+            document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            selectedLang = btn.dataset.lang;
+        }
+
+        // ==================== السحب والإفلات ====================
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drag-over');
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            const file = e.dataTransfer.files[0];
+            if (file && file.type.startsWith('image/')) {
+                loadImage(file);
+            } else {
+                showToast('يرجى اختيار ملف صورة صالح', 'error');
+            }
+        });
+
+        // اختيار ملف
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) loadImage(file);
+        });
+
+        // لصق من الحافظة (Ctrl+V)
+        document.addEventListener('paste', (e) => {
+            const items = e.clipboardData?.items;
+            if (!items) return;
+            for (let item of items) {
+                if (item.type.startsWith('image/')) {
+                    const file = item.getAsFile();
+                    if (file) loadImage(file);
+                    break;
+                }
+            }
+        });
+
+        // زر اللصق
+        async function pasteFromClipboard() {
+            try {
+                const items = await navigator.clipboard.read();
+                for (let item of items) {
+                    for (let type of item.types) {
+                        if (type.startsWith('image/')) {
+                            const blob = await item.getType(type);
+                            loadImage(new File([blob], 'paste.png', { type }));
+                            return;
+                        }
+                    }
+                }
+                showToast('لا توجد صورة في الحافظة', 'error');
+            } catch (err) {
+                showToast('استخدم Ctrl+V للصق صورة من الحافظة', 'error');
+            }
+        }
+
+        // ==================== تحميل الصورة ====================
+        function loadImage(file) {
+            if (isProcessing) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                currentImageSrc = e.target.result;
+                previewImage.src = currentImageSrc;
+                previewContainer.classList.remove('hidden');
+                dropZone.classList.add('hidden');
+                startBtn.disabled = false;
+                croppedImageData = null;
+                exitCropMode();
+                showToast('تم تحميل الصورة بنجاح', 'success');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // ==================== إزالة الصورة ====================
+        function removeImage() {
+            if (isProcessing) return;
+            currentImageSrc = null;
+            croppedImageData = null;
+            previewImage.src = '';
+            previewContainer.classList.add('hidden');
+            dropZone.classList.remove('hidden');
+            startBtn.disabled = true;
+            fileInput.value = '';
+            exitCropMode();
+        }
+
+        // ==================== وضع القص ====================
+        function toggleCropMode() {
+            if (cropMode) {
+                exitCropMode();
+            } else {
+                enterCropMode();
+            }
+        }
+
+        function enterCropMode() {
+            cropMode = true;
+            cropOverlay.classList.add('active');
+            cropBtn.style.borderColor = 'var(--accent)';
+            cropBtn.style.color = 'var(--accent)';
+            cropRect.style.display = 'none';
+            cropStart = null;
+            cropEnd = null;
+            croppedImageData = null;
+        }
+
+        function exitCropMode() {
+            cropMode = false;
+            cropOverlay.classList.remove('active');
+            cropBtn.style.borderColor = '';
+            cropBtn.style.color = '';
+            cropRect.style.display = 'none';
+        }
+
+        // أحداث القص
+        cropOverlay.addEventListener('mousedown', (e) => {
+            if (!cropMode) return;
+            const rect = cropOverlay.getBoundingClientRect();
+            cropStart = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+            cropEnd = null;
+            croppedImageData = null;
+        });
+
+        cropOverlay.addEventListener('mousemove', (e) => {
+            if (!cropMode || !cropStart) return;
+            const rect = cropOverlay.getBoundingClientRect();
+            cropEnd = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+            drawCropRect();
+        });
+
+        cropOverlay.addEventListener('mouseup', () => {
+            if (!cropMode || !cropStart || !cropEnd) return;
+            applyCrop();
+        });
+
+        // دعم اللمس
+        cropOverlay.addEventListener('touchstart', (e) => {
+            if (!cropMode) return;
+            e.preventDefault();
+            const touch = e.touches[0];
+            const rect = cropOverlay.getBoundingClientRect();
+            cropStart = { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+            cropEnd = null;
+            croppedImageData = null;
+        }, { passive: false });
+
+        cropOverlay.addEventListener('touchmove', (e) => {
+            if (!cropMode || !cropStart) return;
+            e.preventDefault();
+            const touch = e.touches[0];
+            const rect = cropOverlay.getBoundingClientRect();
+            cropEnd = { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+            drawCropRect();
+        }, { passive: false });
+
+        cropOverlay.addEventListener('touchend', () => {
+            if (!cropMode || !cropStart || !cropEnd) return;
+            applyCrop();
+        });
+
+        function drawCropRect() {
+            const x = Math.min(cropStart.x, cropEnd.x);
+            const y = Math.min(cropStart.y, cropEnd.y);
+            const w = Math.abs(cropEnd.x - cropStart.x);
+            const h = Math.abs(cropEnd.y - cropStart.y);
+            cropRect.style.display = 'block';
+            cropRect.style.left = x + 'px';
+            cropRect.style.top = y + 'px';
+            cropRect.style.width = w + 'px';
+            cropRect.style.height = h + 'px';
+        }
+
+        function applyCrop() {
+            if (!cropStart || !cropEnd) return;
+
+            const img = previewImage;
+            const containerRect = cropOverlay.getBoundingClientRect();
+            const imgNaturalW = img.naturalWidth;
+            const imgNaturalH = img.naturalHeight;
+
+            // نسبة الصورة المعروضة
+            const displayW = img.clientWidth;
+            const displayH = img.clientHeight;
+            const offsetX = (containerRect.width - displayW) / 2;
+            const offsetY = (containerRect.height - displayH) / 2;
+
+            const x = Math.min(cropStart.x, cropEnd.x) - offsetX;
+            const y = Math.min(cropStart.y, cropEnd.y) - offsetY;
+            const w = Math.abs(cropEnd.x - cropStart.x);
+            const h = Math.abs(cropEnd.y - cropStart.y);
+
+            // تحويل إلى إحداثيات الصورة الأصلية
+            const scaleX = imgNaturalW / displayW;
+            const scaleY = imgNaturalH / displayH;
+
+            const srcX = Math.max(0, x * scaleX);
+            const srcY = Math.max(0, y * scaleY);
+            const srcW = Math.min(w * scaleX, imgNaturalW - srcX);
+            const srcH = Math.min(h * scaleY, imgNaturalH - srcY);
+
+            if (srcW < 10 || srcH < 10) {
+                showToast('المنطقة المحددة صغيرة جداً', 'error');
+                return;
+            }
+
+            cropCanvas.width = srcW;
+            cropCanvas.height = srcH;
+            const ctx = cropCanvas.getContext('2d');
+
+            const tempImg = new Image();
+            tempImg.onload = () => {
+                ctx.drawImage(tempImg, srcX, srcY, srcW, srcH, 0, 0, srcW, srcH);
+                croppedImageData = cropCanvas.toDataURL('image/png');
+                showToast('تم تحديد المنطقة — اضغط بدء الاستخراج', 'success');
+            };
+            tempImg.src = currentImageSrc;
+        }
+
+        // ==================== استخراج النص (OCR) ====================
+        async function startOCR() {
+            if (isProcessing || !currentImageSrc) return;
+            isProcessing = true;
+            startBtn.disabled = true;
+            progressSection.classList.remove('hidden');
+            scanLine.classList.add('active');
+
+            // إعادة تعيين النتائج
+            resultBox.innerHTML = '';
+            emptyState.style.display = 'none';
+            resultActions.style.display = 'none';
+            statsSection.classList.add('hidden');
+            searchSection.classList.add('hidden');
+            extractedText = '';
+
+            const imageToProcess = croppedImageData || currentImageSrc;
+
+            try {
+                updateProgress(0, 'جاري تحميل محرك التعرف...');
+
+                const result = await Tesseract.recognize(
+                    imageToProcess,
+                    selectedLang,
+                    {
+                        logger: (m) => {
+                            if (m.status === 'recognizing text') {
+                                const pct = Math.round(m.progress * 100);
+                                updateProgress(pct, 'جاري قراءة النص...');
+                            } else if (m.status === 'loading language traineddata') {
+                                const pct = Math.round(m.progress * 100);
+                                updateProgress(pct, 'جاري تحميل بيانات اللغة...');
+                            } else if (m.status === 'initializing api') {
+                                updateProgress(0, 'جاري تهيئة المحرك...');
+                            }
+                        }
+                    }
+                );
+
+                updateProgress(100, 'اكتمل!');
+                extractedText = result.data.text.trim();
+
+                if (extractedText.length === 0) {
+                    resultBox.innerHTML = `<div class="flex flex-col items-center justify-center h-full opacity-60">
+                        <i class="fa-solid fa-face-meh text-4xl mb-3"></i>
+                        <p>لم يتم العثور على نص في الصورة</p>
+                        <p class="text-sm mt-1" style="color: var(--muted);">جرب تغيير اللغة أو تحسين جودة الصورة</p>
+                    </div>`;
+                } else {
+                    displayResult(extractedText, result.data.confidence);
+                }
+
+            } catch (err) {
+                console.error(err);
+                resultBox.innerHTML = `<div class="flex flex-col items-center justify-center h-full opacity-60">
+                    <i class="fa-solid fa-triangle-exclamation text-4xl mb-3" style="color: var(--danger);"></i>
+                    <p>حدث خطأ أثناء المعالجة</p>
+                    <p class="text-sm mt-1" style="color: var(--muted);">${err.message || 'تحقق من اتصالك بالإنترنت وحاول مرة أخرى'}</p>
+                </div>`;
+                showToast('حدث خطأ أثناء الاستخراج', 'error');
+            } finally {
+                isProcessing = false;
+                startBtn.disabled = false;
+                scanLine.classList.remove('active');
+                setTimeout(() => {
+                    progressSection.classList.add('hidden');
+                }, 1000);
+            }
+        }
+
+        function updateProgress(pct, label) {
+            progressFill.style.width = pct + '%';
+            progressPercent.textContent = pct + '%';
+            progressLabel.textContent = label;
+        }
+
+        // ==================== عرض النتيجة ====================
+        function displayResult(text, confidence) {
+            // عرض النص مع تمييز الكلمات
+            resultBox.textContent = text;
+            resultActions.style.display = 'flex';
+            statsSection.classList.remove('hidden');
+            searchSection.classList.remove('hidden');
+
+            // الإحصائيات
+            const chars = text.length;
+            // حساب الكلمات (يدعم العربية والإنجليزية)
+            const words = text.split(/[\s\u00A0]+/).filter(w => w.length > 0).length;
+            const conf = Math.round(confidence);
+
+            animateNumber('statChars', chars);
+            animateNumber('statWords', words);
+            animateNumber('statConf', conf, '%');
+
+            showToast('تم استخراج النص بنجاح', 'success');
+        }
+
+        function animateNumber(id, target, suffix = '') {
+            const el = document.getElementById(id);
+            let current = 0;
+            const step = Math.max(1, Math.floor(target / 30));
+            const interval = setInterval(() => {
+                current += step;
+                if (current >= target) {
+                    current = target;
+                    clearInterval(interval);
+                }
+                el.textContent = current.toLocaleString('ar-EG') + suffix;
+            }, 25);
+        }
+
+        // ==================== البحث في النص ====================
+        function searchInResult() {
+            const query = document.getElementById('searchInput').value;
+            if (!extractedText || !query) {
+                resultBox.textContent = extractedText;
+                return;
+            }
+
+            const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            try {
+                const regex = new RegExp(`(${escaped})`, 'gi');
+                const parts = extractedText.split(regex);
+                resultBox.innerHTML = parts.map(part => {
+                    if (part.toLowerCase() === query.toLowerCase()) {
+                        return `<mark style="background: rgba(0,232,157,0.3); color: var(--fg); padding: 1px 3px; border-radius: 3px;">${part}</mark>`;
+                    }
+                    return part;
+                }).join('');
+            } catch {
+                resultBox.textContent = extractedText;
+            }
+        }
+
+        // ==================== نسخ النص ====================
+        async function copyResult() {
+            if (!extractedText) return;
+            try {
+                await navigator.clipboard.writeText(extractedText);
+                showToast('تم نسخ النص إلى الحافظة', 'success');
+            } catch {
+                // fallback
+                const ta = document.createElement('textarea');
+                ta.value = extractedText;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                showToast('تم نسخ النص إلى الحافظة', 'success');
+            }
+        }
+
+        // ==================== تحميل النص ====================
+        function downloadResult() {
+            if (!extractedText) return;
+            const blob = new Blob([extractedText], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'extracted-text.txt';
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('تم تحميل الملف', 'success');
+        }
+
+        // ==================== قراءة النص صوتياً ====================
+        function speakResult() {
+            if (!extractedText) return;
+            const speakBtn = document.getElementById('speakBtn');
+
+            if (isSpeaking) {
+                speechSynthesis.cancel();
+                isSpeaking = false;
+                speakBtn.innerHTML = '<i class="fa-solid fa-volume-high"></i> قراءة';
+                return;
+            }
+
+            const utterance = new SpeechSynthesisUtterance(extractedText);
+            // تحديد اللغة بناءً على الاختيار
+            const langMap = {
+                'ara': 'ar-SA',
+                'eng': 'en-US',
+                'ara+eng': 'ar-SA',
+                'fra': 'fr-FR',
+                'deu': 'de-DE',
+                'tur': 'tr-TR',
+                'urd': 'ur-PK',
+                'jpn': 'ja-JP',
+                'chi_sim': 'zh-CN',
+                'rus': 'ru-RU'
+            };
+            utterance.lang = langMap[selectedLang] || 'ar-SA';
+            utterance.onend = () => {
+                isSpeaking = false;
+                speakBtn.innerHTML = '<i class="fa-solid fa-volume-high"></i> قراءة';
+            };
+            speechSynthesis.speak(utterance);
+            isSpeaking = true;
+            speakBtn.innerHTML = '<i class="fa-solid fa-volume-xmark"></i> إيقاف';
+        }
+
+        // ==================== إعادة تعيين ====================
+        function resetAll() {
+            if (isProcessing) {
+                speechSynthesis.cancel();
+                isProcessing = false;
+            }
+            removeImage();
+            resultBox.innerHTML = '';
+            emptyState.style.display = '';
+            resultBox.appendChild(emptyState);
+            resultActions.style.display = 'none';
+            statsSection.classList.add('hidden');
+            searchSection.classList.add('hidden');
+            progressSection.classList.add('hidden');
+            extractedText = '';
+            isSpeaking = false;
+            document.getElementById('speakBtn').innerHTML = '<i class="fa-solid fa-volume-high"></i> قراءة';
+            document.getElementById('searchInput').value = '';
+        }
+
+        // ==================== إشعار Toast ====================
+        function showToast(msg, type = 'success') {
+            const toast = document.getElementById('toast');
+            const icon = document.getElementById('toastIcon');
+            const msgEl = document.getElementById('toastMsg');
+
+            msgEl.textContent = msg;
+            toast.className = 'toast ' + type;
+
+            if (type === 'success') {
+                icon.className = 'fa-solid fa-check-circle';
+                icon.style.color = 'var(--accent)';
+            } else {
+                icon.className = 'fa-solid fa-circle-exclamation';
+                icon.style.color = 'var(--danger)';
+            }
+
+            // إظهار
+            requestAnimationFrame(() => {
+                toast.classList.add('show');
+            });
+
+            // إخفاء بعد 3 ثوان
+            clearTimeout(toast._timeout);
+            toast._timeout = setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
